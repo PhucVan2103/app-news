@@ -318,7 +318,7 @@
 
         // ----- CẤU HÌNH FIREBASE -----
         const fallbackConfig = {
-            apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
+            apiKey: "AIzaSyBkWQS1CCijxX8ffEyslXFSn5WAXJBKNTM",
             authDomain: "app-news-855c6.firebaseapp.com",
             projectId: "app-news-855c6",
             storageBucket: "app-news-855c6.firebasestorage.app",
@@ -346,8 +346,11 @@
         // ĐIỀN GEMINI API KEY VÀO ĐÂY KHI CHẠY Ở LOCAL/VERCEL
         const apiKey = "AIzaSyDx7kbKeDxxvJ6idb9R0MEuZMZcjE4yn5o"; 
         
-        // TỰ ĐỘNG CHỌN MÔ HÌNH: Nếu có API key người dùng, dùng bản 1.5 public, nếu chạy nội bộ Canvas thì dùng bản preview
-        const textModel = apiKey !== "" ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
+        // KHẮC PHỤC LỖI API KEY: Tự động xóa khoảng trắng thừa ở đầu/cuối bằng trim()
+        const safeApiKey = apiKey.trim();
+        
+        // TỰ ĐỘNG CHỌN MÔ HÌNH: Dùng gemini-1.5-flash-latest để tương thích 100% với API Key cá nhân
+        const textModel = safeApiKey !== "" ? "gemini-1.5-flash-latest" : "gemini-2.5-flash-preview-09-2025";
         
         window.uploadedImageData = ''; 
 
@@ -528,8 +531,12 @@ Bản tin:\n${rawText}`;
                     } 
                 };
 
-                const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!geminiRes.ok) throw new Error("Lỗi API phân tích bản tin");
+                const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!geminiRes.ok) {
+                    const errorDetail = await geminiRes.text();
+                    console.error("Chi tiết lỗi Gemini:", errorDetail);
+                    throw new Error(`Lỗi API phân tích bản tin (${geminiRes.status})`);
+                }
                 const aiData = JSON.parse((await geminiRes.json()).candidates[0].content.parts[0].text);
 
                 let finalImageUrl = '';
@@ -854,11 +861,15 @@ Bản tin:\n${rawText}`;
                     }
                 };
 
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${apiKey}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) throw new Error("Lỗi API");
+                if (!response.ok) {
+                    const errorDetail = await response.text();
+                    console.error("Chi tiết lỗi Gemini:", errorDetail);
+                    throw new Error(`Lỗi API phân tích ngữ pháp (${response.status})`);
+                }
                 const result = await response.json();
                 const data = JSON.parse(result.candidates[0].content.parts[0].text);
 
@@ -910,11 +921,15 @@ Bản tin:\n${rawText}`;
                     }
                 };
 
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${apiKey}`, {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) throw new Error("Lỗi API");
+                if (!response.ok) {
+                    const errorDetail = await response.text();
+                    console.error("Chi tiết lỗi Gemini:", errorDetail);
+                    throw new Error(`Lỗi API sinh ví dụ (${response.status})`);
+                }
                 const result = await response.json();
                 const data = JSON.parse(result.candidates[0].content.parts[0].text);
 
@@ -1172,8 +1187,12 @@ Hội thoại:\n${rawText}`;
                     } 
                 };
 
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!response.ok) throw new Error("Lỗi API phân tích");
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!response.ok) {
+                    const errorDetail = await response.text();
+                    console.error("Chi tiết lỗi Gemini:", errorDetail);
+                    throw new Error(`Lỗi API phân tích bài học (${response.status})`);
+                }
                 const aiData = JSON.parse((await response.json()).candidates[0].content.parts[0].text);
 
                 let customImage = window.uploadedImageData || inputImageUrl;
@@ -1207,7 +1226,7 @@ Hội thoại:\n${rawText}`;
         let currentAudio = null;
 
         async function fetchTTSAudio(text, speaker) {
-            if (apiKey !== "") {
+            if (safeApiKey !== "") {
                 // Nếu dùng key cá nhân thì văng lỗi để rơi thẳng vào Catch và bật trình duyệt đọc.
                 throw new Error("TTS API is only available in Canvas environment");
             }
@@ -1219,7 +1238,7 @@ Hội thoại:\n${rawText}`;
             else if (speaker === 'Example') promptText = `Read this Japanese sentence clearly and naturally: ${text}`;
 
             const payload = { contents: [{ parts: [{ text: promptText }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } } };
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${apiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             const inlineData = (await response.json()).candidates?.[0]?.content?.parts?.[0]?.inlineData;
             if (inlineData) {
                 const pcmData = base64ToPcm(inlineData.data);
