@@ -317,13 +317,13 @@
         import { getFirestore, collection, addDoc, setDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // ----- CẤU HÌNH FIREBASE -----
-        const fallbackConfig = {
-            apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
-            authDomain: "app-news-855c6.firebaseapp.com",
-            projectId: "app-news-855c6",
-            storageBucket: "app-news-855c6.firebasestorage.app",
-            messagingSenderId: "740136197166",
-            appId: "1:740136197166:web:6aba89e9723293160a53bf"
+        const firebaseConfig = {
+        apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
+        authDomain: "app-news-855c6.firebaseapp.com",
+        projectId: "app-news-855c6",
+        storageBucket: "app-news-855c6.firebasestorage.app",
+        messagingSenderId: "740136197166",
+        appId: "1:740136197166:web:6aba89e9723293160a53bf"
         };
         
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
