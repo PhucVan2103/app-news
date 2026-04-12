@@ -343,7 +343,7 @@
         let isSyncingNews = false;
         let isAutoSyncStarted = false; 
         
-        // ĐIỀN GEMINI API KEY MỚI TẠO VÀO ĐÂY
+        // ĐIỀN GEMINI API KEY CỦA BẠN VÀO ĐÂY
         const apiKey = "AIzaSyC6kBxA6NDhnaS4mhn_MKNlbqWIdWSYQjM"; 
         const safeApiKey = apiKey.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
         
@@ -363,7 +363,6 @@
         async function callGeminiAPI(prompt, schema) {
             const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + JSON.stringify(schema);
             
-            // Thử các mô hình phổ thông nhất
             const modelsToTry = [
                 "gemini-2.5-flash",
                 "gemini-2.0-flash",
@@ -392,8 +391,11 @@
                         let rawText = jsonRes.candidates[0].content.parts[0].text;
                         rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
                         return JSON.parse(rawText);
+                    } else if (response.status === 429) {
+                        throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt gọi AI miễn phí (15 lần/phút). Vui lòng nghỉ tay khoảng 1 phút rồi thử lại nhé!");
                     }
                 } catch (error) {
+                    if (error.message.includes("429")) throw error; // Quá tải thì dừng báo lỗi ngay, không thử model khác nữa
                     console.warn(`[Fallback] Bỏ qua mô hình ${model}`);
                 }
             }
@@ -406,7 +408,9 @@
                     const availableModels = data.models.map(m => m.name.replace('models/', ''));
                     const geminiModels = availableModels.filter(m => m.includes('gemini')).join(', ');
                     
-                    throw new Error(`⚠️ API KEY HỢP LỆ, NHƯNG KHÔNG CÓ QUYỀN TRUY CẬP!\n\nAPI Key của bạn chỉ được phép sử dụng các mô hình cũ này:\n[ ${geminiModels || "Không có mô hình Gemini nào"} ]\n\nCách xử lý: Vui lòng vào aistudio.google.com -> Tạo 1 Project Mới -> Tạo API Key trong Project đó để được cấp quyền dùng bản 1.5 Flash.`);
+                    throw new Error(`⚠️ API KEY HỢP LỆ, NHƯNG KHÔNG CÓ QUYỀN TRUY CẬP!\n\nAPI Key của bạn chỉ được phép sử dụng các mô hình cũ này:\n[ ${geminiModels || "Không có mô hình Gemini nào"} ]\n\nCách xử lý: Vui lòng vào aistudio.google.com -> Tạo 1 Project Mới -> Tạo API Key trong Project đó để được cấp quyền.`);
+                } else if (diagRes.status === 429) {
+                    throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt yêu cầu miễn phí (15 lần/phút). Vui lòng đợi 1 phút rồi thử lại!");
                 } else {
                     throw new Error(`❌ TỪ CHỐI KẾT NỐI (Lỗi ${diagRes.status})\n\nAPI Key của bạn bị Google khóa hoặc không tồn tại. Vui lòng tạo Key mới.`);
                 }
@@ -749,7 +753,9 @@ Bản tin:\n${rawText}`;
             ).join('');
 
             initPlayer(lesson.videoId, displayImageUrl);
-            renderTranscript(); renderVocabulary(); preloadAllAudio();
+            renderTranscript(); renderVocabulary(); 
+            // KHÔNG PRELOAD ĐỂ TIẾT KIỆM QUOTA
+            // preloadAllAudio();
         }
 
         window.switchMainTab = function(tabName) {
@@ -1228,7 +1234,10 @@ Hội thoại:\n${rawText}`;
                 body: JSON.stringify(payload) 
             });
             
-            if (!response.ok) throw new Error("Lỗi API TTS");
+            if (!response.ok) {
+                if (response.status === 429) throw new Error("API đang quá tải (Hết lượt miễn phí). Vui lòng đợi 1 phút.");
+                throw new Error("Lỗi API TTS");
+            }
             
             const inlineData = (await response.json()).candidates?.[0]?.content?.parts?.[0]?.inlineData;
             if (inlineData) {
@@ -1236,16 +1245,6 @@ Hội thoại:\n${rawText}`;
                 return URL.createObjectURL(pcmToWav(pcmData, 24000));
             }
             throw new Error("Không lấy được dữ liệu âm thanh");
-        }
-
-        async function preloadAllAudio() {
-            if(!lessonData) return;
-            for (const item of lessonData) {
-                const cacheKey = `${item.speaker}_${item.plainText}`;
-                if (!audioCache[cacheKey]) {
-                    try { audioCache[cacheKey] = await fetchTTSAudio(item.plainText, item.speaker); await new Promise(r => setTimeout(r, 1000)); } catch (e) { }
-                }
-            }
         }
 
         window.manualSpeak = function(text, speaker, btnId) {
@@ -1266,7 +1265,7 @@ Hội thoại:\n${rawText}`;
                 audioCache[cacheKey] = await fetchTTSAudio(text, speaker); 
                 return await playAudio(audioCache[cacheKey], btn, originalIcon);
             } catch (error) {
-                console.warn("TTS API bị lỗi hoặc quá tải. Tự động chuyển sang giọng đọc Native của trình duyệt.", error);
+                console.warn(`TTS API bị lỗi hoặc quá tải. Tự động chuyển sang giọng đọc Native của trình duyệt. Error: ${error.message}`);
                 if (btn) { btn.innerHTML = originalIcon; btn.classList.remove('text-indigo-500'); }
                 
                 // FALLBACK: Giọng đọc của trình duyệt được tối ưu hóa
