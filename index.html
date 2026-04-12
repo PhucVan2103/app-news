@@ -318,7 +318,7 @@
 
         // ----- CẤU HÌNH FIREBASE -----
         const fallbackConfig = {
-            apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
+            apiKey: "AIzaSyBkWQS1CCijxX8ffEyslXFSn5WAXJBKNTM",
             authDomain: "app-news-855c6.firebaseapp.com",
             projectId: "app-news-855c6",
             storageBucket: "app-news-855c6.firebasestorage.app",
@@ -347,7 +347,6 @@
         const apiKey = "AIzaSyAcwVNvTiCp94HNL5p5i_jDIhb-fMvC8y4"; 
         const safeApiKey = apiKey.trim();
         
-        const textModel = safeApiKey !== "" ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
         window.uploadedImageData = ''; 
 
         const TOPIC_STYLES = {
@@ -360,33 +359,66 @@
             'Khác': 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
-        // HÀM GỌI AI ĐƯỢC TỐI ƯU HÓA: Dùng JSON Schema & Bắt lỗi 404
+        // HÀM GỌI AI BẤT TỬ: Tự động quét nghiệm tất cả các mô hình
         async function callGeminiAPI(prompt, schema) {
-            const payload = {
-                contents: [{ parts: [{ text: prompt }] }],
-                generationConfig: {
-                    responseMimeType: "application/json",
-                    responseSchema: schema
-                }
-            };
+            const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + JSON.stringify(schema);
+            
+            // Danh sách toàn bộ các mô hình từ mới đến cũ để thử nghiệm
+            const modelsToTry = [
+                "gemini-1.5-flash",
+                "gemini-1.5-flash-001",
+                "gemini-1.5-flash-002",
+                "gemini-1.5-flash-8b",
+                "gemini-1.5-pro",
+                "gemini-2.5-flash-preview-09-2025",
+                "gemini-pro"
+            ];
 
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-            });
+            let lastErrorMsg = "";
 
-            if (!response.ok) {
-                const errText = await response.text();
-                console.error("Chi tiết lỗi Gemini:", errText);
-                if (response.status === 404) {
-                    throw new Error("LỖI 404: API Key của bạn không có quyền! BẮT BUỘC tạo 1 API Key MỚI TINH tại aistudio.google.com");
-                } else if (response.status === 400) {
-                    throw new Error("LỖI 400: API Key không hợp lệ.");
+            for (const model of modelsToTry) {
+                try {
+                    console.log(`Đang thử gọi mô hình: ${model}...`);
+                    
+                    const payload = {
+                        contents: [{ parts: [{ text: finalPrompt }] }],
+                        generationConfig: {
+                            responseMimeType: "application/json",
+                            responseSchema: schema
+                        }
+                    };
+
+                    let response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${safeApiKey}`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+                    });
+
+                    // Nếu model cũ (gemini-pro) không hỗ trợ responseSchema (Lỗi 400), thử gọi lại dạng text thường
+                    if (response.status === 400) {
+                        const fallbackPayload = { contents: [{ parts: [{ text: finalPrompt }] }] };
+                        response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${safeApiKey}`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(fallbackPayload)
+                        });
+                    }
+
+                    if (response.ok) {
+                        const jsonRes = await response.json();
+                        let rawText = jsonRes.candidates[0].content.parts[0].text;
+                        rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                        console.log(`✅ Thành công kết nối với mô hình: ${model}`);
+                        return JSON.parse(rawText);
+                    } else {
+                        const errText = await response.text();
+                        console.warn(`❌ [Fallback] Mô hình ${model} thất bại (${response.status}). Đang chuyển...`);
+                        lastErrorMsg = `[${model}] - ${errText}`;
+                    }
+                } catch (error) {
+                    console.warn(`❌ [Fallback] Lỗi khi gọi mô hình ${model}:`, error);
+                    lastErrorMsg = error.message;
                 }
-                throw new Error(`Lỗi kết nối AI (${response.status})`);
             }
 
-            const data = await response.json();
-            return JSON.parse(data.candidates[0].content.parts[0].text);
+            console.error("Tất cả các mô hình Gemini đều từ chối API Key của bạn. Lỗi cuối cùng:", lastErrorMsg);
+            throw new Error("LỖI AI: API Key của bạn không được Google hỗ trợ bất kỳ mô hình nào. Vui lòng đổi tài khoản Google khác để lấy Key!");
         }
 
         const lessonSchema = {
