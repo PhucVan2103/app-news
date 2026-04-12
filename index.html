@@ -319,32 +319,19 @@
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // ----- CẤU HÌNH FIREBASE -----
-        // LƯU Ý: Đây là cấu hình tự động cho môi trường Canvas.
-        // KHI DEPLOY LÊN VERCEL/GITHUB, HÃY THAY BẰNG CẤU HÌNH CỦA BẠN (Xem Hướng dẫn Bước 4)
-        //const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
-        //const app = initializeApp(firebaseConfig);
-        //const auth = getAuth(app);
-        //const db = getFirestore(app);
-        //const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-
-        // Import the functions you need from the SDKs you need
-import { initializeApp } from "firebase/app";
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-
-// Your web app's Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
-  authDomain: "app-news-855c6.firebaseapp.com",
-  projectId: "app-news-855c6",
-  storageBucket: "app-news-855c6.firebasestorage.app",
-  messagingSenderId: "740136197166",
-  appId: "1:740136197166:web:6aba89e9723293160a53bf"
-};
-
-// Initialize Firebase
-const app = initializeApp(firebaseConfig);
+        // ----- CẤU HÌNH FIREBASE CỦA BẠN -----
+        const firebaseConfig = {
+            apiKey: "AIzaSyBkWQS1CCijxX8ffEyslXFSn5WAXJBKNTM",
+            authDomain: "app-news-855c6.firebaseapp.com",
+            projectId: "app-news-855c6",
+            storageBucket: "app-news-855c6.firebasestorage.app",
+            messagingSenderId: "740136197166",
+            appId: "1:740136197166:web:6aba89e9723293160a53bf"
+        };
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = 'app-news-855c6'; // Tên ID cố định cho hệ thống của bạn
 
         let currentUser = null;
         let lessonsDb = [];
