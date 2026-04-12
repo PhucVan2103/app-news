@@ -359,11 +359,11 @@
             'Khác': 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
-        // HÀM GỌI AI & CHẨN ĐOÁN LỖI THÔNG MINH ĐÃ FIX THEO ẢNH
+        // HÀM GỌI AI & CHẨN ĐOÁN LỖI THÔNG MINH
         async function callGeminiAPI(prompt, schema) {
             const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + JSON.stringify(schema);
             
-            // Cập nhật lại danh sách model DỰA TRÊN KẾT QUẢ CHẨN ĐOÁN Ở ẢNH BẠN GỬI
+            // Thử các mô hình phổ thông nhất
             const modelsToTry = [
                 "gemini-2.5-flash",
                 "gemini-2.0-flash",
@@ -1159,13 +1159,6 @@ Bản tin:\n${rawText}`;
 
             if (!rawText) { err.innerText = "Chưa nhập nội dung!"; err.classList.remove('hidden'); return; }
             
-            // KIỂM TRA NGĂN CHẶN NHẦM API KEY
-            if (safeApiKey !== "" && safeApiKey === firebaseConfig.apiKey) {
-                err.innerText = "LỖI: Bạn đang dùng Firebase API Key cho Gemini. Vui lòng vào aistudio.google.com lấy đúng Gemini Key!";
-                err.classList.remove('hidden'); 
-                return;
-            }
-
             err.classList.add('hidden'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...'; btn.disabled = true;
 
             try {
@@ -1208,26 +1201,41 @@ Hội thoại:\n${rawText}`;
         // ----- AUDIO -----
         const audioCache = {};
         let currentAudio = null;
+        
+        // Khởi tạo lấy giọng đọc dự phòng từ trình duyệt ngay khi load web
+        if ('speechSynthesis' in window) {
+            window.speechSynthesis.getVoices();
+        }
 
         async function fetchTTSAudio(text, speaker) {
-            if (safeApiKey !== "") {
-                throw new Error("Tính năng phát âm chỉ có sẵn trong môi trường Canvas do giới hạn của Google API.");
-            }
-            
             const voiceName = (speaker.toLowerCase().includes('sato') || speaker.toLowerCase().includes('bác sĩ') || speaker.toLowerCase().includes('nam') || speaker.toLowerCase() === 'a' || speaker.toLowerCase().includes('buchou') || speaker.toLowerCase().includes('suzuki') || speaker.toLowerCase().includes('yamada') || speaker.toLowerCase() === 'nhk news') && speaker !== 'Vocab' && speaker !== 'Example' ? 'Fenrir' : 'Kore'; 
             
-            let promptText = `Say naturally in Japanese: ${text}`;
-            if (speaker === 'Vocab') promptText = `Pronounce this Japanese word clearly and correctly: ${text}`;
-            else if (speaker === 'Example') promptText = `Read this Japanese sentence clearly and naturally: ${text}`;
+            // ÉP AI ĐỌC TIẾNG NHẬT NATIVE BẰNG PROMPT TIẾNG NHẬT CHUẨN
+            let promptText = `次の日本語を自然な発音で読んでください: ${text}`;
+            if (speaker === 'Vocab') promptText = `次の日本語の単語をはっきりと発音してください: ${text}`;
+            else if (speaker === 'Example') promptText = `次の日本語の例文を自然に読んでください: ${text}`;
 
-            const payload = { contents: [{ parts: [{ text: promptText }] }], generationConfig: { responseModalities: ["AUDIO"], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } } };
-            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            const payload = { 
+                contents: [{ parts: [{ text: promptText }] }], 
+                generationConfig: { 
+                    responseModalities: ["AUDIO"], 
+                    speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName } } } 
+                } 
+            };
+            const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-tts:generateContent?key=${safeApiKey}`, { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify(payload) 
+            });
+            
+            if (!response.ok) throw new Error("Lỗi API TTS");
+            
             const inlineData = (await response.json()).candidates?.[0]?.content?.parts?.[0]?.inlineData;
             if (inlineData) {
                 const pcmData = base64ToPcm(inlineData.data);
                 return URL.createObjectURL(pcmToWav(pcmData, 24000));
             }
-            throw new Error("Lỗi Audio");
+            throw new Error("Không lấy được dữ liệu âm thanh");
         }
 
         async function preloadAllAudio() {
@@ -1255,11 +1263,32 @@ Hội thoại:\n${rawText}`;
             if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>'; btn.classList.add('text-indigo-500'); }
 
             try {
-                audioCache[cacheKey] = await fetchTTSAudio(text, speaker); return await playAudio(audioCache[cacheKey], btn, originalIcon);
+                audioCache[cacheKey] = await fetchTTSAudio(text, speaker); 
+                return await playAudio(audioCache[cacheKey], btn, originalIcon);
             } catch (error) {
+                console.warn("TTS API bị lỗi hoặc quá tải. Tự động chuyển sang giọng đọc Native của trình duyệt.", error);
                 if (btn) { btn.innerHTML = originalIcon; btn.classList.remove('text-indigo-500'); }
+                
+                // FALLBACK: Giọng đọc của trình duyệt được tối ưu hóa
                 return new Promise((resolve) => {
-                    if ('speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(text); u.lang = 'ja-JP'; u.onend = resolve; u.onerror = resolve; window.speechSynthesis.speak(u); } else resolve();
+                    if ('speechSynthesis' in window) { 
+                        const u = new SpeechSynthesisUtterance(text); 
+                        u.lang = 'ja-JP'; 
+                        
+                        // Tìm giọng đọc Google/Premium tiếng Nhật tốt nhất thay vì giọng mặc định robot
+                        const voices = window.speechSynthesis.getVoices();
+                        const jaVoices = voices.filter(v => v.lang.includes('ja') || v.lang.includes('JP'));
+                        const premiumVoice = jaVoices.find(v => v.name.includes('Google') || v.name.includes('Premium') || v.name.includes('Natural'));
+                        
+                        if (premiumVoice) u.voice = premiumVoice;
+                        else if (jaVoices.length > 0) u.voice = jaVoices[0];
+
+                        u.rate = 0.9; // Đọc chậm lại một chút để nghe rõ và tự nhiên hơn
+                        u.pitch = 1.0;
+                        u.onend = resolve; 
+                        u.onerror = resolve; 
+                        window.speechSynthesis.speak(u); 
+                    } else resolve();
                 });
             }
         }
