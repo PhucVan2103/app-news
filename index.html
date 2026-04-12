@@ -363,17 +363,20 @@
             'Khác': 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
-        // HÀM GỌI AI & CHẨN ĐOÁN LỖI THÔNG MINH
+        // HÀM GỌI AI: ĐƯỢC TỐI ƯU HÓA THEO GIỚI HẠN QUOTA (DỰA TRÊN ẢNH CHỤP)
         async function callGeminiAPI(prompt, schema) {
             const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + JSON.stringify(schema);
             
+            // Xếp hạng các model ưu tiên dựa vào bảng Quota của tài khoản bạn:
+            // 1. Gemini 3.1 Flash Lite: 500 lượt/ngày (TOP 1)
+            // 2. Gemini 2.5 Flash Lite: 20 lượt/ngày
+            // 3. Gemini 3 Flash / 2.5 Flash: 20 lượt/ngày
             const modelsToTry = [
-                "gemini-2.5-flash",
-                "gemini-2.0-flash",
-                "gemini-flash-latest",
-                "gemini-1.5-flash",
-                "gemini-1.5-pro",
-                "gemini-2.5-flash-preview-09-2025"
+                "gemini-3.1-flash-lite-preview", // Ưu tiên số 1: Giới hạn siêu cao (15 RPM, 500 RPD)
+                "gemini-2.5-flash-lite",         // Phương án 2 (10 RPM)
+                "gemini-3-flash-preview",        // Phương án 3 (5 RPM)
+                "gemini-2.5-flash",              // Phương án 4 (5 RPM)
+                "gemini-1.5-flash"               // Phương án cuối cùng
             ];
 
             for (const model of modelsToTry) {
@@ -396,7 +399,7 @@
                         rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
                         return JSON.parse(rawText);
                     } else if (response.status === 429) {
-                        throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt gọi AI miễn phí (15 lần/phút). Vui lòng nghỉ tay khoảng 1 phút rồi thử lại nhé!");
+                        throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt gọi AI miễn phí. Vui lòng nghỉ tay khoảng 1 phút rồi thử lại nhé!");
                     }
                 } catch (error) {
                     if (error.message.includes("429")) throw error; // Quá tải thì dừng báo lỗi ngay, không thử model khác nữa
@@ -412,9 +415,9 @@
                     const availableModels = data.models.map(m => m.name.replace('models/', ''));
                     const geminiModels = availableModels.filter(m => m.includes('gemini')).join(', ');
                     
-                    throw new Error(`⚠️ API KEY HỢP LỆ, NHƯNG KHÔNG CÓ QUYỀN TRUY CẬP!\n\nAPI Key của bạn chỉ được phép sử dụng các mô hình cũ này:\n[ ${geminiModels || "Không có mô hình Gemini nào"} ]\n\nCách xử lý: Vui lòng vào aistudio.google.com -> Tạo 1 Project Mới -> Tạo API Key trong Project đó để được cấp quyền.`);
+                    throw new Error(`⚠️ API KEY HỢP LỆ, NHƯNG KHÔNG CÓ QUYỀN TRUY CẬP!\n\nAPI Key của bạn chỉ được phép sử dụng các mô hình này:\n[ ${geminiModels || "Không có mô hình Gemini nào"} ]`);
                 } else if (diagRes.status === 429) {
-                    throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt yêu cầu miễn phí (15 lần/phút). Vui lòng đợi 1 phút rồi thử lại!");
+                    throw new Error("⏳ HỆ THỐNG QUÁ TẢI (Lỗi 429)\nBạn đã dùng hết lượt yêu cầu miễn phí. Vui lòng đợi 1 phút rồi thử lại!");
                 } else {
                     throw new Error(`❌ TỪ CHỐI KẾT NỐI (Lỗi ${diagRes.status})\n\nAPI Key của bạn bị Google khóa hoặc không tồn tại. Vui lòng tạo Key mới.`);
                 }
