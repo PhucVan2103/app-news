@@ -318,12 +318,12 @@
 
         // ----- CẤU HÌNH FIREBASE -----
         const fallbackConfig = {
-        apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
-        authDomain: "app-news-855c6.firebaseapp.com",
-        projectId: "app-news-855c6",
-        storageBucket: "app-news-855c6.firebasestorage.app",
-        messagingSenderId: "740136197166",
-        appId: "1:740136197166:web:6aba89e9723293160a53bf"
+            apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
+            authDomain: "app-news-855c6.firebaseapp.com",
+            projectId: "app-news-855c6",
+            storageBucket: "app-news-855c6.firebasestorage.app",
+            messagingSenderId: "740136197166",
+            appId: "1:740136197166:web:6aba89e9723293160a53bf"
         };
         
         const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : fallbackConfig;
@@ -345,15 +345,7 @@
         
         // ĐIỀN GEMINI API KEY VÀO ĐÂY KHI CHẠY Ở LOCAL/VERCEL
         const apiKey = "AIzaSyDx7kbKeDxxvJ6idb9R0MEuZMZcjE4yn5o"; 
-        
-        // KHẮC PHỤC LỖI API KEY: Tự động xóa khoảng trắng thừa ở đầu/cuối bằng trim()
         const safeApiKey = apiKey.trim();
-        
-        // SỬA LỖI 404: Tự động chọn mô hình dựa trên môi trường
-        // Chạy Local/Vercel (có API Key cá nhân) -> dùng gemini-1.5-flash
-        // Chạy tại trang web này (Canvas) -> dùng bản preview
-        const textModel = safeApiKey !== "" ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
-        
         window.uploadedImageData = ''; 
 
         // Khai báo bảng màu chủ đề
@@ -367,6 +359,43 @@
             'Khác': 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
+        // HÀM GỌI AI THÔNG MINH: Tự động Fallback Model nếu bị lỗi 404 hoặc 403
+        async function callGeminiAPI(prompt, jsonFormat) {
+            // Danh sách các model để thử dần. Ưu tiên 1.5 Flash -> 1.5 Pro -> Pro 1.0 (cho API Key Cá nhân)
+            let modelsToTry = safeApiKey !== "" ? ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"] : ["gemini-2.5-flash-preview-09-2025"];
+            let lastError = null;
+            
+            // Ép AI luôn trả về JSON sạch, không kèm định dạng markdown rác
+            const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + jsonFormat;
+            const payload = { contents: [{ parts: [{ text: finalPrompt }] }] };
+
+            for (const model of modelsToTry) {
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${safeApiKey}`, { 
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) 
+                    });
+                    
+                    if (response.ok) {
+                        const jsonRes = await response.json();
+                        let rawText = jsonRes.candidates[0].content.parts[0].text;
+                        // Làm sạch markdown nếu có
+                        rawText = rawText.replace(/```json/gi, '').replace(/```/g, '').trim();
+                        return JSON.parse(rawText);
+                    } else {
+                        const errText = await response.text();
+                        lastError = new Error(`Lỗi ${response.status} (${model}): ${errText}`);
+                        console.warn(`[Fallback] Model ${model} bị từ chối truy cập. Tự động thử model tiếp theo...`);
+                        // Nếu lỗi do phiên bản không tồn tại (404) hoặc không có quyền (403), thử model khác
+                        if (response.status !== 404 && response.status !== 403) throw lastError; 
+                    }
+                } catch (e) {
+                    lastError = e;
+                    if (!e.message.includes('404') && !e.message.includes('403')) throw e; 
+                }
+            }
+            throw lastError;
+        }
+
         const initAuth = async () => {
             try {
                 if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
@@ -377,7 +406,7 @@
             } catch (error) {
                 console.error("Lỗi xác thực:", error);
                 document.getElementById('lessonTitle').innerText = "Lỗi xác thực Firebase";
-                document.getElementById('lessonMeta').innerHTML = `<span class="text-red-500 font-medium">Vui lòng kiểm tra lại API Key hoặc bật Đăng nhập Ẩn danh</span>`;
+                document.getElementById('lessonMeta').innerHTML = `<span class="text-red-500 font-medium">Vui lòng kiểm tra lại cấu hình Authentication</span>`;
             }
         };
         initAuth();
@@ -450,6 +479,12 @@
         async function fetchAndProcessNHKNews() {
             if (!currentUser || isSyncingNews) return { status: 'error', message: 'Hệ thống đang bận xử lý' };
             
+            // KIỂM TRA NGĂN CHẶN NHẦM API KEY GIỮA FIREBASE VÀ GEMINI
+            if (safeApiKey !== "" && safeApiKey === firebaseConfig.apiKey) {
+                isSyncingNews = false; updateSyncStatus(false);
+                return { status: 'error', message: 'LỖI: Bạn đang dùng chung Firebase Key cho Gemini. Vui lòng vào aistudio.google.com lấy đúng Gemini Key!' };
+            }
+
             isSyncingNews = true;
             updateSyncStatus(true);
 
@@ -480,24 +515,16 @@
                     const isDuplicate = lessonsDb.some(l => {
                         if (!l.title) return false;
                         if (l.sourceLink && item.link && l.sourceLink === item.link) return true;
-                        
                         const existingTitle = l.title.trim().toLowerCase();
                         const newTitle = cleanTitle.toLowerCase();
                         if (existingTitle === newTitle) return true;
-                        
                         const baseExisting = existingTitle.replace('bản tin nhk: ', '').trim();
                         const baseNew = rawTitle.toLowerCase().trim();
-                        if (baseExisting.length > 15 && baseNew.length > 15 && 
-                            (baseExisting.includes(baseNew) || baseNew.includes(baseExisting))) {
-                            return true;
-                        }
+                        if (baseExisting.length > 15 && baseNew.length > 15 && (baseExisting.includes(baseNew) || baseNew.includes(baseExisting))) return true;
                         return false;
                     });
 
-                    if (!isDuplicate) {
-                        newArticle = { ...item, cleanTitle };
-                        break; 
-                    }
+                    if (!isDuplicate) { newArticle = { ...item, cleanTitle }; break; }
                 }
 
                 if (!newArticle) {
@@ -515,31 +542,15 @@ Yêu cầu 4 (level): Đánh giá cấp độ JLPT phù hợp nhất (chỉ ch�
 Yêu cầu 5 (topic): Phân loại chủ đề (chỉ chọn 1 trong: Thể Thao, Công nghệ, Đời sống, Công ty, Tin thế giới, Khác). Cực kỳ ưu tiên chọn "Công nghệ" hoặc "Thể Thao" nếu nội dung có liên quan.
 Bản tin:\n${rawText}`;
                 
-                const payload = { 
-                    contents: [{ parts: [{ text: prompt }] }], 
-                    generationConfig: { 
-                        responseMimeType: "application/json", 
-                        responseSchema: { 
-                            type: "OBJECT", 
-                            properties: { 
-                                dialogues: { type: "ARRAY", items: { type: "OBJECT", properties: { time: { type: "INTEGER" }, speaker: { type: "STRING" }, japanese: { type: "STRING" }, plainText: { type: "STRING" }, romaji: { type: "STRING" }, vietnamese: { type: "STRING" } }, required: ["speaker", "japanese", "plainText", "romaji", "vietnamese"] } }, 
-                                vocabulary: { type: "ARRAY", items: { type: "OBJECT", properties: { word: { type: "STRING" }, kana: { type: "STRING" }, romaji: { type: "STRING" }, meaning: { type: "STRING" } }, required: ["word", "kana", "romaji", "meaning"] } },
-                                imagePrompt: { type: "STRING" },
-                                level: { type: "STRING" },
-                                topic: { type: "STRING" }
-                            }, 
-                            required: ["dialogues", "vocabulary", "level", "topic"] 
-                        } 
-                    } 
-                };
+                const jsonFormat = `{
+  "dialogues": [{ "time": 0, "speaker": "NHK NEWS", "japanese": "...", "plainText": "...", "romaji": "...", "vietnamese": "..." }],
+  "vocabulary": [{ "word": "...", "kana": "...", "romaji": "...", "meaning": "..." }],
+  "imagePrompt": "...",
+  "level": "N3",
+  "topic": "Tin thế giới"
+}`;
 
-                const geminiRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!geminiRes.ok) {
-                    const errorDetail = await geminiRes.text();
-                    console.error("Chi tiết lỗi Gemini:", errorDetail);
-                    throw new Error(`Lỗi API phân tích bản tin (${geminiRes.status})`);
-                }
-                const aiData = JSON.parse((await geminiRes.json()).candidates[0].content.parts[0].text);
+                const aiData = await callGeminiAPI(prompt, jsonFormat);
 
                 let finalImageUrl = '';
                 if (aiData.imagePrompt) {
@@ -588,6 +599,8 @@ Bản tin:\n${rawText}`;
             btn.classList.remove('opacity-70');
 
             if (result.status === 'no_news') {
+                alert(result.message);
+            } else if (result.status === 'error') {
                 alert(result.message);
             }
         };
@@ -844,36 +857,13 @@ Bản tin:\n${rawText}`;
             contentDiv.innerHTML = '<div class="flex flex-col items-center justify-center py-10"><i class="fas fa-spinner fa-spin text-3xl text-indigo-500 mb-3"></i><span class="text-slate-500 font-medium">AI đang phân tích câu...</span></div>';
 
             try {
-                const prompt = `Phân tích câu tiếng Nhật sau: "${text}". Trả về định dạng JSON nghiêm ngặt.`;
-                const payload = {
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                meaning: { type: "STRING" },
-                                politeness: { type: "STRING" },
-                                grammarPoints: {
-                                    type: "ARRAY",
-                                    items: { type: "OBJECT", properties: { point: { type: "STRING" }, explanation: { type: "STRING" } } }
-                                }
-                            }
-                        }
-                    }
-                };
-
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errorDetail = await response.text();
-                    console.error("Chi tiết lỗi Gemini:", errorDetail);
-                    throw new Error(`Lỗi API phân tích ngữ pháp (${response.status})`);
-                }
-                const result = await response.json();
-                const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                const prompt = `Phân tích câu tiếng Nhật sau: "${text}".`;
+                const jsonFormat = `{
+  "meaning": "...",
+  "politeness": "...",
+  "grammarPoints": [{ "point": "...", "explanation": "..." }]
+}`;
+                const data = await callGeminiAPI(prompt, jsonFormat);
 
                 let html = `
                     <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-4">
@@ -907,33 +897,13 @@ Bản tin:\n${rawText}`;
             container.innerHTML = '<div class="flex items-center gap-2 text-amber-600"><i class="fas fa-spinner fa-spin"></i> AI đang suy nghĩ...</div>';
 
             try {
-                const prompt = `Tạo 1 câu ví dụ tiếng Nhật thực tế, tự nhiên sử dụng từ vựng "${word}". Trả về chuẩn JSON.`;
-                const payload = {
-                    contents: [{ parts: [{ text: prompt }] }],
-                    generationConfig: {
-                        responseMimeType: "application/json",
-                        responseSchema: {
-                            type: "OBJECT",
-                            properties: {
-                                japanese: { type: "STRING" },
-                                romaji: { type: "STRING" },
-                                vietnamese: { type: "STRING" }
-                            }
-                        }
-                    }
-                };
-
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
-                });
-
-                if (!response.ok) {
-                    const errorDetail = await response.text();
-                    console.error("Chi tiết lỗi Gemini:", errorDetail);
-                    throw new Error(`Lỗi API sinh ví dụ (${response.status})`);
-                }
-                const result = await response.json();
-                const data = JSON.parse(result.candidates[0].content.parts[0].text);
+                const prompt = `Tạo 1 câu ví dụ tiếng Nhật thực tế, tự nhiên sử dụng từ vựng "${word}".`;
+                const jsonFormat = `{
+  "japanese": "...",
+  "romaji": "...",
+  "vietnamese": "..."
+}`;
+                const data = await callGeminiAPI(prompt, jsonFormat);
 
                 container.innerHTML = `
                     <div class="flex justify-between items-start gap-2">
@@ -1160,6 +1130,14 @@ Bản tin:\n${rawText}`;
             const err = document.getElementById('analyzeError');
 
             if (!rawText) { err.innerText = "Chưa nhập nội dung!"; err.classList.remove('hidden'); return; }
+            
+            // KIỂM TRA NGĂN CHẶN NHẦM API KEY
+            if (safeApiKey !== "" && safeApiKey === firebaseConfig.apiKey) {
+                err.innerText = "LỖI: Bạn đang dùng Firebase API Key cho Gemini. Vui lòng vào aistudio.google.com lấy đúng Gemini Key!";
+                err.classList.remove('hidden'); 
+                return;
+            }
+
             err.classList.add('hidden'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...'; btn.disabled = true;
 
             try {
@@ -1171,31 +1149,15 @@ Yêu cầu 4 (level): Đánh giá cấp độ JLPT phù hợp nhất dựa trên
 Yêu cầu 5 (topic): Phân loại chủ đề (chọn 1 trong: Thể Thao, Công nghệ, Đời sống, Công ty, Tin thế giới, Khác).
 Hội thoại:\n${rawText}`;
                 
-                const payload = { 
-                    contents: [{ parts: [{ text: prompt }] }], 
-                    generationConfig: { 
-                        responseMimeType: "application/json", 
-                        responseSchema: { 
-                            type: "OBJECT", 
-                            properties: { 
-                                dialogues: { type: "ARRAY", items: { type: "OBJECT", properties: { time: { type: "INTEGER" }, speaker: { type: "STRING" }, japanese: { type: "STRING" }, plainText: { type: "STRING" }, romaji: { type: "STRING" }, vietnamese: { type: "STRING" } }, required: ["speaker", "japanese", "plainText", "romaji", "vietnamese"] } }, 
-                                vocabulary: { type: "ARRAY", items: { type: "OBJECT", properties: { word: { type: "STRING" }, kana: { type: "STRING" }, romaji: { type: "STRING" }, meaning: { type: "STRING" } }, required: ["word", "kana", "romaji", "meaning"] } },
-                                imagePrompt: { type: "STRING" },
-                                level: { type: "STRING" },
-                                topic: { type: "STRING" }
-                            }, 
-                            required: ["dialogues", "vocabulary", "level", "topic"] 
-                        } 
-                    } 
-                };
+                const jsonFormat = `{
+  "dialogues": [{ "time": 0, "speaker": "...", "japanese": "...", "plainText": "...", "romaji": "...", "vietnamese": "..." }],
+  "vocabulary": [{ "word": "...", "kana": "...", "romaji": "...", "meaning": "..." }],
+  "imagePrompt": "...",
+  "level": "N3",
+  "topic": "Đời sống"
+}`;
 
-                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${textModel}:generateContent?key=${safeApiKey}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-                if (!response.ok) {
-                    const errorDetail = await response.text();
-                    console.error("Chi tiết lỗi Gemini:", errorDetail);
-                    throw new Error(`Lỗi API phân tích bài học (${response.status})`);
-                }
-                const aiData = JSON.parse((await response.json()).candidates[0].content.parts[0].text);
+                const aiData = await callGeminiAPI(prompt, jsonFormat);
 
                 let customImage = window.uploadedImageData || inputImageUrl;
                 let finalImageUrl = customImage;
@@ -1229,7 +1191,6 @@ Hội thoại:\n${rawText}`;
 
         async function fetchTTSAudio(text, speaker) {
             if (safeApiKey !== "") {
-                // Nếu dùng key cá nhân thì văng lỗi để rơi thẳng vào Catch và bật trình duyệt đọc.
                 throw new Error("TTS API is only available in Canvas environment");
             }
             
