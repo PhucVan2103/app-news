@@ -345,7 +345,6 @@
         
         // ĐIỀN GEMINI API KEY MỚI TẠO VÀO ĐÂY
         const apiKey = "AIzaSyC6kBxA6NDhnaS4mhn_MKNlbqWIdWSYQjM"; 
-        // Khắc phục rác copy: Loại bỏ toàn bộ khoảng trắng và ký tự ẩn
         const safeApiKey = apiKey.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
         
         window.uploadedImageData = ''; 
@@ -360,12 +359,15 @@
             'Khác': 'bg-gray-100 text-gray-600 border-gray-200'
         };
 
-        // HÀM GỌI AI & CHẨN ĐOÁN LỖI THÔNG MINH
+        // HÀM GỌI AI & CHẨN ĐOÁN LỖI THÔNG MINH ĐÃ FIX THEO ẢNH
         async function callGeminiAPI(prompt, schema) {
             const finalPrompt = prompt + "\n\nLƯU Ý QUAN TRỌNG: Chỉ trả về duy nhất chuỗi JSON hợp lệ theo đúng cấu trúc dưới đây. Không bọc trong markdown, không giải thích thêm.\nCấu trúc JSON bắt buộc:\n" + JSON.stringify(schema);
             
-            // Thử các mô hình phổ thông nhất
+            // Cập nhật lại danh sách model DỰA TRÊN KẾT QUẢ CHẨN ĐOÁN Ở ẢNH BẠN GỬI
             const modelsToTry = [
+                "gemini-2.5-flash",
+                "gemini-2.0-flash",
+                "gemini-flash-latest",
                 "gemini-1.5-flash",
                 "gemini-1.5-pro",
                 "gemini-2.5-flash-preview-09-2025"
