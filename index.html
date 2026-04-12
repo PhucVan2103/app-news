@@ -343,6 +343,10 @@
         let isSyncingNews = false;
         let isAutoSyncStarted = false; 
         
+        // --- BIẾN QUẢN LÝ CẦU CHÌ API ---
+        let isTtsOnCooldown = false;
+        let ttsCooldownTimer = null;
+        
         // ĐIỀN GEMINI API KEY CỦA BẠN VÀO ĐÂY
         const apiKey = "AIzaSyC6kBxA6NDhnaS4mhn_MKNlbqWIdWSYQjM"; 
         const safeApiKey = apiKey.replace(/[\u200B-\u200D\uFEFF]/g, '').trim();
@@ -754,8 +758,6 @@ Bản tin:\n${rawText}`;
 
             initPlayer(lesson.videoId, displayImageUrl);
             renderTranscript(); renderVocabulary(); 
-            // KHÔNG PRELOAD ĐỂ TIẾT KIỆM QUOTA
-            // preloadAllAudio();
         }
 
         window.switchMainTab = function(tabName) {
@@ -1235,7 +1237,7 @@ Hội thoại:\n${rawText}`;
             });
             
             if (!response.ok) {
-                if (response.status === 429) throw new Error("API đang quá tải (Hết lượt miễn phí). Vui lòng đợi 1 phút.");
+                if (response.status === 429) throw new Error("429"); 
                 throw new Error("Lỗi API TTS");
             }
             
@@ -1245,6 +1247,37 @@ Hội thoại:\n${rawText}`;
                 return URL.createObjectURL(pcmToWav(pcmData, 24000));
             }
             throw new Error("Không lấy được dữ liệu âm thanh");
+        }
+
+        function playNativeTTS(text, btn, originalIcon) {
+            return new Promise((resolve) => {
+                if (btn) { btn.innerHTML = originalIcon; btn.classList.remove('text-indigo-500'); }
+                
+                if ('speechSynthesis' in window) { 
+                    const u = new SpeechSynthesisUtterance(text); 
+                    u.lang = 'ja-JP'; 
+                    
+                    // Tìm giọng đọc Premium/Tự nhiên nhất của trình duyệt
+                    const voices = window.speechSynthesis.getVoices();
+                    const jaVoices = voices.filter(v => v.lang.includes('ja') || v.lang.includes('JP'));
+                    const premiumVoice = jaVoices.find(v => v.name.includes('Google') || v.name.includes('Premium') || v.name.includes('Natural'));
+                    
+                    if (premiumVoice) u.voice = premiumVoice;
+                    else if (jaVoices.length > 0) u.voice = jaVoices[0];
+
+                    u.rate = 0.9; // Đọc chậm lại cho tự nhiên
+                    u.pitch = 1.0;
+                    
+                    if (btn) btn.classList.add('text-emerald-500', 'animate-pulse');
+
+                    u.onend = () => { if(btn) btn.classList.remove('text-emerald-500', 'animate-pulse'); resolve(); };
+                    u.onerror = () => { if(btn) btn.classList.remove('text-emerald-500', 'animate-pulse'); resolve(); };
+                    
+                    window.speechSynthesis.speak(u); 
+                } else {
+                    resolve();
+                }
+            });
         }
 
         window.manualSpeak = function(text, speaker, btnId) {
@@ -1259,36 +1292,31 @@ Hội thoại:\n${rawText}`;
             const originalIcon = '<i class="fas fa-volume-up text-xs"></i>';
 
             if (audioCache[cacheKey]) return playAudio(audioCache[cacheKey], btn, originalIcon);
+            
+            // Kích hoạt cầu chì: Bỏ qua API Gemini nếu đang bị quá tải
+            if (isTtsOnCooldown) {
+                return await playNativeTTS(text, btn, originalIcon);
+            }
+
             if (btn) { btn.innerHTML = '<i class="fas fa-spinner fa-spin text-xs"></i>'; btn.classList.add('text-indigo-500'); }
 
             try {
-                audioCache[cacheKey] = await fetchTTSAudio(text, speaker); 
-                return await playAudio(audioCache[cacheKey], btn, originalIcon);
+                const url = await fetchTTSAudio(text, speaker); 
+                audioCache[cacheKey] = url;
+                return await playAudio(url, btn, originalIcon);
             } catch (error) {
-                console.warn(`TTS API bị lỗi hoặc quá tải. Tự động chuyển sang giọng đọc Native của trình duyệt. Error: ${error.message}`);
-                if (btn) { btn.innerHTML = originalIcon; btn.classList.remove('text-indigo-500'); }
-                
-                // FALLBACK: Giọng đọc của trình duyệt được tối ưu hóa
-                return new Promise((resolve) => {
-                    if ('speechSynthesis' in window) { 
-                        const u = new SpeechSynthesisUtterance(text); 
-                        u.lang = 'ja-JP'; 
-                        
-                        // Tìm giọng đọc Google/Premium tiếng Nhật tốt nhất thay vì giọng mặc định robot
-                        const voices = window.speechSynthesis.getVoices();
-                        const jaVoices = voices.filter(v => v.lang.includes('ja') || v.lang.includes('JP'));
-                        const premiumVoice = jaVoices.find(v => v.name.includes('Google') || v.name.includes('Premium') || v.name.includes('Natural'));
-                        
-                        if (premiumVoice) u.voice = premiumVoice;
-                        else if (jaVoices.length > 0) u.voice = jaVoices[0];
-
-                        u.rate = 0.9; // Đọc chậm lại một chút để nghe rõ và tự nhiên hơn
-                        u.pitch = 1.0;
-                        u.onend = resolve; 
-                        u.onerror = resolve; 
-                        window.speechSynthesis.speak(u); 
-                    } else resolve();
-                });
+                if (error.message.includes('429')) {
+                    console.warn("⏳ Kích hoạt chế độ Cầu Chì: API quá tải. Chuyển sang giọng Native trong 60 giây để bảo vệ API Key.");
+                    isTtsOnCooldown = true;
+                    clearTimeout(ttsCooldownTimer);
+                    ttsCooldownTimer = setTimeout(() => {
+                        isTtsOnCooldown = false;
+                        console.log("🟢 Đã khôi phục giọng AI Gemini.");
+                    }, 60000); 
+                } else {
+                    console.warn(`Lỗi TTS: ${error.message}. Chuyển sang giọng Native.`);
+                }
+                return await playNativeTTS(text, btn, originalIcon);
             }
         }
 
