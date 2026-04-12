@@ -349,8 +349,10 @@
         // KHẮC PHỤC LỖI API KEY: Tự động xóa khoảng trắng thừa ở đầu/cuối bằng trim()
         const safeApiKey = apiKey.trim();
         
-        // TỰ ĐỘNG CHỌN MÔ HÌNH CHUẨN XÁC: Luôn sử dụng gemini-2.5-flash-preview-09-2025 để đảm bảo tương thích 100%
-        const textModel = "gemini-2.5-flash-preview-09-2025";
+        // SỬA LỖI 404: Tự động chọn mô hình dựa trên môi trường
+        // Chạy Local/Vercel (có API Key cá nhân) -> dùng gemini-1.5-flash
+        // Chạy tại trang web này (Canvas) -> dùng bản preview
+        const textModel = safeApiKey !== "" ? "gemini-1.5-flash" : "gemini-2.5-flash-preview-09-2025";
         
         window.uploadedImageData = ''; 
 
