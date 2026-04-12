@@ -8,7 +8,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
-
         @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap');
 
         body {
@@ -323,18 +322,29 @@
         // ----- CẤU HÌNH FIREBASE -----
         // LƯU Ý: Đây là cấu hình tự động cho môi trường Canvas.
         // KHI DEPLOY LÊN VERCEL/GITHUB, HÃY THAY BẰNG CẤU HÌNH CỦA BẠN (Xem Hướng dẫn Bước 4)
-        // Your web app's Firebase configuration
-        const firebaseConfig = {
-            apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
-            authDomain: "app-news-855c6.firebaseapp.com",
-            projectId: "app-news-855c6",
-            storageBucket: "app-news-855c6.firebasestorage.app",
-            messagingSenderId: "740136197166",
-            appId: "1:740136197166:web:6aba89e9723293160a53bf"
-        };
+        //const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        //const app = initializeApp(firebaseConfig);
+        //const auth = getAuth(app);
+        //const db = getFirestore(app);
+        //const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-        // Initialize Firebase
-        const app = initializeApp(firebaseConfig);
+        // Import the functions you need from the SDKs you need
+import { initializeApp } from "firebase/app";
+// TODO: Add SDKs for Firebase products that you want to use
+// https://firebase.google.com/docs/web/setup#available-libraries
+
+// Your web app's Firebase configuration
+const firebaseConfig = {
+  apiKey: "AIzaSyBKwQS1CCijxX8fFEyslXFSn5WAXJBKNTM",
+  authDomain: "app-news-855c6.firebaseapp.com",
+  projectId: "app-news-855c6",
+  storageBucket: "app-news-855c6.firebasestorage.app",
+  messagingSenderId: "740136197166",
+  appId: "1:740136197166:web:6aba89e9723293160a53bf"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
 
         let currentUser = null;
         let lessonsDb = [];
@@ -344,10 +354,11 @@
         let isPlayingAll = false;
         let currentPlayAllIndex = 0;
         let nhkSyncInterval = null; 
-        let isSyncingNews = false; 
+        let isSyncingNews = false;
+        let isAutoSyncStarted = false; // Cờ kiểm soát vòng lặp đồng bộ
         
         // LƯU Ý: Thay bằng API KEY của bạn khi deploy local!
-        const apiKey = AIzaSyDx7kbKeDxxvJ6idb9R0MEuZMZcjE4yn5o; 
+        const apiKey = "AIzaSyDx7kbKeDxxvJ6idb9R0MEuZMZcjE4yn5o"; 
         window.uploadedImageData = ''; 
 
         // Khai báo bảng màu chủ đề
@@ -394,11 +405,24 @@
                         loadCurrentLesson();
                         const grid = document.getElementById('lessonGrid');
                         if (grid) renderLibraryList();
+                    } else {
+                        document.getElementById('lessonTitle').innerText = "Chưa có bài học nào";
                     }
 
-                    startNHKAutoSync();
+                    // KHẮC PHỤC LỖI TRÙNG LẶP: Đảm bảo bộ đếm đồng bộ chỉ khởi động 1 lần
+                    if (!isAutoSyncStarted) {
+                        isAutoSyncStarted = true;
+                        startNHKAutoSync();
+                    }
                 }
-            }, (error) => console.error("Lỗi Database:", error));
+            }, (error) => {
+                // KHẮC PHỤC LỖI "ĐANG TẢI...": Bắt lỗi kết nối và báo ra màn hình
+                console.error("Lỗi Database:", error);
+                document.getElementById('lessonTitle').innerText = "Lỗi kết nối Cơ sở dữ liệu";
+                document.getElementById('lessonMeta').innerHTML = `<span class="text-red-500 font-medium">Vui lòng kiểm tra lại cấu hình Firebase của bạn</span>`;
+                document.getElementById('lessonImage').classList.add('hidden');
+                document.getElementById('imagePlaceholder').classList.add('hidden');
+            });
         }
 
         // ----- AUTO SYNC NHK NEWS -----
@@ -655,7 +679,10 @@ Bản tin:\n${rawText}`;
         // ----- RENDER -----
         function loadCurrentLesson() {
             if (typeof window.stopPlayAll === 'function') window.stopPlayAll();
-            if (lessonsDb.length === 0) return;
+            if (lessonsDb.length === 0) {
+                document.getElementById('lessonTitle').innerText = "Chưa có bài học nào";
+                return;
+            }
             const lesson = lessonsDb[currentLessonIndex];
             lessonData = lesson.dialogues || [];
 
