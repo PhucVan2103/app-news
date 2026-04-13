@@ -145,7 +145,7 @@
                         <span id="lessonMeta" class="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
                             <span class="px-2 py-0.5 bg-indigo-100 text-indigo-700 rounded">--</span>
                         </span>
-                        <div id="lessonTags" class="flex gap-1.5 overflow-x-auto"></div>
+                        <div id="lessonTags" class="flex gap-1.5 overflow-x-auto flex-wrap"></div>
                     </div>
                 </div>
 
@@ -553,6 +553,34 @@
         function base64ToPcm(b) { const s = window.atob(b), a = new Uint8Array(s.length); for (let i=0; i<s.length; i++) a[i]=s.charCodeAt(i); return new Int16Array(a.buffer); }
         function pcmToWav(p, r) { const b=new ArrayBuffer(44+p.byteLength), v=new DataView(b), w=(o,s)=>{for(let i=0;i<s.length;i++)v.setUint8(o+i,s.charCodeAt(i))}; w(0,'RIFF');v.setUint32(4,36+p.byteLength,true);w(8,'WAVE');w(12,'fmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,r,true);v.setUint32(28,r*2,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,p.byteLength,true); let o=44;for(let i=0;i<p.length;i++,o+=2)v.setInt16(o,p[i],true); return new Blob([v],{type:'audio/wav'}); }
         function formatTime(s) { return `${Math.floor(s/60)}:${(s%60).toString().padStart(2,'0')}`; }
+        function timeAgo(timestamp) {
+            if (!timestamp) return '';
+            const seconds = Math.floor((Date.now() - timestamp) / 1000);
+            let interval = seconds / 31536000;
+            if (interval > 1) return Math.floor(interval) + " năm trước";
+            interval = seconds / 2592000;
+            if (interval > 1) return Math.floor(interval) + " tháng trước";
+            interval = seconds / 86400;
+            if (interval > 1) return Math.floor(interval) + " ngày trước";
+            interval = seconds / 3600;
+            if (interval > 1) return Math.floor(interval) + " giờ trước";
+            interval = seconds / 60;
+            if (interval > 1) return Math.floor(interval) + " phút trước";
+            return "Vừa xong";
+        }
+
+        function getGroupDateLabel(timestamp) {
+            if (!timestamp) return 'Cũ hơn';
+            const date = new Date(timestamp);
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+            
+            if (date.toDateString() === today.toDateString()) return 'Hôm nay';
+            if (date.toDateString() === yesterday.toDateString()) return 'Hôm qua';
+            
+            return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
 
         // ==========================================
         // GEMINI API
@@ -788,7 +816,7 @@
             unsubscribeLessons = onSnapshot(lessonsRef, (snapshot) => {
                 const fetchedLessons = [];
                 snapshot.forEach(doc => { fetchedLessons.push({ ...doc.data(), _docId: doc.id }); });
-                fetchedLessons.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+                fetchedLessons.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)); // Sắp xếp mới nhất lên đầu
 
                 if (fetchedLessons.length === 0) {
                     DEFAULT_LESSONS.forEach(async (lesson) => { await addDoc(lessonsRef, { ...lesson, createdAt: Date.now() }); });
@@ -917,30 +945,59 @@
             const levelColor = lesson.level?.includes('N5') || lesson.level?.includes('N4') ? 'bg-emerald-100 text-emerald-700' : lesson.level?.includes('N3') ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700';
             const topicStr = lesson.topic || 'Khác'; const topicColorStyle = TOPIC_STYLES[topicStr] || TOPIC_STYLES['Khác'];
             document.getElementById('lessonMeta').innerHTML = `<span class="px-2 py-0.5 rounded font-bold ${levelColor}">${lesson.level || 'Chưa đánh giá'}</span><span class="px-2 py-0.5 rounded font-semibold text-[10px] uppercase tracking-wider border ${topicColorStyle}">${topicStr}</span>`;
-            document.getElementById('lessonTags').innerHTML = (lesson.tags || []).map(tag => `<span class="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-md border border-slate-200/60">${tag}</span>`).join('');
+            
+            let tagsHtml = (lesson.tags || []).map(tag => `<span class="px-2.5 py-1 bg-slate-100 text-slate-600 text-[10px] font-semibold rounded-md border border-slate-200/60">${tag}</span>`).join('');
+            if (lesson.createdAt) {
+                tagsHtml += `<span class="px-2.5 py-1 bg-indigo-50 text-indigo-600 text-[10px] font-semibold rounded-md border border-indigo-100 flex items-center gap-1"><i class="fas fa-clock"></i> ${timeAgo(lesson.createdAt)}</span>`;
+            }
+            document.getElementById('lessonTags').innerHTML = tagsHtml;
+            
             initPlayer(lesson.videoId, displayImageUrl); renderTranscript(); renderVocabulary(); trackLessonHistory(lesson);
         }
 
         function renderLibraryList() {
             const grid = document.getElementById('lessonGrid'); if (!grid) return; grid.className = "block"; 
-            const levels = ['N1', 'N2', 'N3', 'N4', 'N5', 'Khác']; const grouped = { 'N5': [], 'N4': [], 'N3': [], 'N2': [], 'N1': [], 'Khác': [] };
-            lessonsDb.forEach((l, i) => { let lvl = (l.level || '').trim().toUpperCase(); if (levels.includes(lvl)) grouped[lvl].push({ data: l, index: i }); else grouped['Khác'].push({ data: l, index: i }); });
-            let html = '';
-            levels.forEach(lvl => {
-                if (grouped[lvl].length > 0) {
-                    const levelColors = { 'N5': 'bg-emerald-100 text-emerald-700 border-emerald-200', 'N4': 'bg-teal-100 text-teal-700 border-teal-200', 'N3': 'bg-amber-100 text-amber-700 border-amber-200', 'N2': 'bg-orange-100 text-orange-700 border-orange-200', 'N1': 'bg-rose-100 text-rose-700 border-rose-200', 'Khác': 'bg-slate-100 text-slate-700 border-slate-200' };
-                    html += `<div class="mt-5 mb-3 first:mt-0"><div class="flex items-center gap-3 px-1"><span class="px-2.5 py-1 text-xs font-bold rounded-lg border shadow-sm ${levelColors[lvl]}">Cấp độ ${lvl}</span><div class="h-px bg-slate-200 flex-1"></div></div></div><div class="flex flex-col gap-3">`;
-                    grouped[lvl].forEach(item => {
-                        const l = item.data; const i = item.index; const topicStr = l.topic || 'Khác'; const topicColorStyle = TOPIC_STYLES[topicStr] || TOPIC_STYLES['Khác'];
-                        html += `
-                            <div class="border border-slate-100 rounded-xl p-4 cursor-pointer relative ${i === currentLessonIndex ? 'ring-2 ring-indigo-500 bg-indigo-50/30' : 'bg-white soft-shadow'}" onclick="window.selectLesson(${i})">
-                                <button onclick="window.openDeleteModal('${l._docId}', '${l.title.replace(/'/g, "\\'")}', event)" class="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 active:bg-red-50 z-10 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>
-                                <div class="pr-8 mb-3"><div class="flex items-center gap-1.5 mb-1.5"><span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${topicColorStyle}">${topicStr}</span></div><h4 class="text-sm font-bold text-slate-800 leading-snug line-clamp-2">${l.title}</h4></div>
-                                <div class="flex justify-between items-center mt-auto border-t border-slate-50 pt-2.5"><p class="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5"><i class="fas fa-comment-dots"></i> ${(l.dialogues || []).length} câu</p>${i === currentLessonIndex ? '<span class="text-[10px] text-indigo-600 font-bold bg-indigo-100 px-2 py-0.5 rounded flex items-center gap-1"><i class="fas fa-play-circle"></i>Đang học</span>' : ''}</div>
-                            </div>`;
-                    });
-                    html += `</div>`; 
+            
+            const grouped = {};
+            const groupKeys = [];
+            
+            lessonsDb.forEach((l, i) => { 
+                const label = getGroupDateLabel(l.createdAt);
+                if (!grouped[label]) {
+                    grouped[label] = [];
+                    groupKeys.push(label);
                 }
+                grouped[label].push({ data: l, index: i }); 
+            });
+
+            let html = '';
+            
+            groupKeys.forEach(label => {
+                html += `<div class="mt-5 mb-3 first:mt-0"><div class="flex items-center gap-3 px-1"><span class="px-2.5 py-1 text-xs font-bold rounded-lg border shadow-sm bg-slate-100 text-slate-700 border-slate-200"><i class="far fa-calendar-alt mr-1"></i> ${label}</span><div class="h-px bg-slate-200 flex-1"></div></div></div><div class="flex flex-col gap-3">`;
+                
+                grouped[label].forEach(item => {
+                    const l = item.data; const i = item.index; const topicStr = l.topic || 'Khác'; const topicColorStyle = TOPIC_STYLES[topicStr] || TOPIC_STYLES['Khác'];
+                    const timeStr = l.createdAt ? timeAgo(l.createdAt) : '';
+                    const levelColor = l.level?.includes('N5') || l.level?.includes('N4') ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : l.level?.includes('N3') ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-rose-50 text-rose-700 border-rose-200';
+                    
+                    html += `
+                        <div class="border border-slate-100 rounded-xl p-4 cursor-pointer relative ${i === currentLessonIndex ? 'ring-2 ring-indigo-500 bg-indigo-50/30' : 'bg-white soft-shadow'}" onclick="window.selectLesson(${i})">
+                            <button onclick="window.openDeleteModal('${l._docId}', '${l.title.replace(/'/g, "\\'")}', event)" class="absolute top-3 right-3 w-8 h-8 flex items-center justify-center rounded-lg text-slate-300 hover:text-red-500 active:bg-red-50 z-10 transition-colors"><i class="fas fa-trash-alt text-sm"></i></button>
+                            <div class="pr-8 mb-3">
+                                <div class="flex items-center gap-1.5 mb-1.5 flex-wrap">
+                                    <span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${topicColorStyle}">${topicStr}</span>
+                                    ${l.level ? `<span class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${levelColor}">${l.level}</span>` : ''}
+                                    ${timeStr ? `<span class="text-[9px] text-slate-400 font-medium ml-1"><i class="fas fa-clock"></i> ${timeStr}</span>` : ''}
+                                </div>
+                                <h4 class="text-sm font-bold text-slate-800 leading-snug line-clamp-2">${l.title}</h4>
+                            </div>
+                            <div class="flex justify-between items-center mt-auto border-t border-slate-50 pt-2.5">
+                                <p class="text-[10px] font-semibold text-slate-400 flex items-center gap-1.5"><i class="fas fa-comment-dots"></i> ${(l.dialogues || []).length} câu</p>
+                                ${i === currentLessonIndex ? '<span class="text-[10px] text-indigo-600 font-bold bg-indigo-100 px-2 py-0.5 rounded flex items-center gap-1"><i class="fas fa-play-circle"></i>Đang học</span>' : ''}
+                            </div>
+                        </div>`;
+                });
+                html += `</div>`; 
             });
             document.getElementById('lessonGrid').innerHTML = html;
         }
@@ -969,18 +1026,18 @@
             const transcriptList = document.getElementById('transcriptList');
             if(!lessonData || lessonData.length === 0) { transcriptList.innerHTML = `<div class="p-8 text-center text-slate-400 text-sm">Chưa có nội dung.</div>`; return; }
             transcriptList.innerHTML = lessonData.map((item, index) => `
-                <div class="transcript-item p-3 mb-1 relative rounded-xl" data-time="${item.time || 0}" id="item-${index}">
-                    <div class="flex justify-between items-center mb-1.5">
+                <div class="transcript-item px-3 py-2 mb-0.5 relative rounded-xl" data-time="${item.time || 0}" id="item-${index}">
+                    <div class="flex justify-between items-center mb-1">
                         <span class="text-[9px] font-bold text-indigo-600 uppercase bg-indigo-50 px-1.5 py-0.5 rounded">${item.speaker}</span>
                         <div class="flex items-center gap-2">
                             <span class="text-[9px] font-semibold text-slate-400">${item.time && item.time > 0 ? formatTime(item.time) : ''}</span>
                             <button id="btn-speak-${index}" onclick="event.stopPropagation(); window.manualSpeak('${item.plainText.replace(/'/g, "\\'")}', '${item.speaker}', 'btn-speak-${index}')" class="btn-speak text-slate-400 p-1 rounded active:bg-slate-100"><i class="fas fa-volume-up text-xs"></i></button>
                         </div>
                     </div>
-                    <div class="japanese-text text-[15px] font-bold mb-1 leading-snug text-slate-800">${item.japanese}</div>
-                    <div class="text-[10px] text-slate-400 font-medium mb-1.5">${item.romaji}</div>
-                    <div class="text-xs text-slate-600 border-t border-slate-100 pt-1.5 font-medium leading-relaxed">${item.vietnamese}</div>
-                    <div class="mt-2.5 flex justify-end"><button onclick="event.stopPropagation(); window.explainGrammar('${item.plainText.replace(/'/g, "\\'")}')" class="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-2.5 py-1.5 rounded-lg transition-colors flex items-center gap-1 active:scale-95 shadow-sm"><i class="fas fa-sparkles text-amber-500"></i> Mochi Giải thích</button></div>
+                    <div class="japanese-text text-[15px] font-bold mb-0.5 leading-snug text-slate-800">${item.japanese}</div>
+                    <div class="text-[10px] text-slate-400 font-medium mb-1">${item.romaji}</div>
+                    <div class="text-xs text-slate-600 border-t border-slate-100 pt-1 font-medium leading-relaxed">${item.vietnamese}</div>
+                    <div class="mt-1.5 flex justify-end"><button onclick="event.stopPropagation(); window.explainGrammar('${item.plainText.replace(/'/g, "\\'")}')" class="text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-100 px-2 py-1 rounded-lg transition-colors flex items-center gap-1 active:scale-95 shadow-sm"><i class="fas fa-sparkles text-amber-500"></i> Mochi Giải thích</button></div>
                 </div>`).join('');
             document.querySelectorAll('.transcript-item').forEach(item => {
                 item.addEventListener('click', () => { const time = parseInt(item.getAttribute('data-time')); if(time > 0) seekTo(time); });
@@ -1146,7 +1203,7 @@
         }
 
         // ==========================================
-        // AI TOOLS & CREATE LESSON
+        // AI TOOLS
         // ==========================================
         window.generateAIInsights = async function() {
             const resultDiv = document.getElementById('aiInsightResult');
@@ -1231,85 +1288,6 @@
             else expl.innerHTML = `<span class="text-rose-600 font-bold block mb-1"><i class="fas fa-times-circle"></i> Sai rồi!</span> ${q.explanation}`;
         }
 
-        window.analyzeAndCreateLesson = async function() {
-            if (!currentUser) return alert("Đang kết nối Database!");
-            const title = document.getElementById('newLessonTitle').value.trim() || 'Bài học AI';
-            const rawText = document.getElementById('rawJapaneseText').value.trim();
-            const levelHint = document.getElementById('newLessonLevel').value.trim();
-            const videoId = document.getElementById('newLessonVideo').value.trim();
-            const inputImageUrl = document.getElementById('newLessonImage').value.trim();
-            const btn = document.getElementById('btnAnalyze');
-            const err = document.getElementById('analyzeError');
-
-            if (!rawText) { err.innerText = "Chưa nhập nội dung!"; err.classList.remove('hidden'); return; }
-            err.classList.add('hidden'); btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Đang tạo...'; btn.disabled = true;
-
-            try {
-                const prompt = `Phân tích đoạn hội thoại/văn bản tiếng Nhật sau. 
-Yêu cầu 1: Trích xuất từng câu (bọc Kanji bằng <ruby><rt>). Dịch tiếng Việt tự nhiên.
-Yêu cầu 2: Trích xuất 10-15 từ vựng quan trọng CÓ XUẤT HIỆN.
-Yêu cầu 3: Viết 1 câu tiếng Anh miêu tả bối cảnh để vẽ tranh AI.
-Yêu cầu 4: Đánh giá cấp độ JLPT phù hợp (N5, N4, N3, N2, N1).
-Yêu cầu 5: Phân loại chủ đề.
-Nội dung:\n${rawText}`;
-                
-                const aiData = await callGeminiAPI(prompt, lessonSchema);
-                let finalImageUrl = window.uploadedImageData || inputImageUrl;
-                if (!finalImageUrl && !videoId && aiData.imagePrompt) {
-                    finalImageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(aiData.imagePrompt + ', beautiful anime style illustration, highly detailed, Japan')}?width=1280&height=720&nologo=true`;
-                }
-
-                await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'lessons'), { 
-                    title, level: levelHint || aiData.level || 'N3', topic: aiData.topic || 'Khác', tags: ['AI'], videoId, imageUrl: finalImageUrl,
-                    dialogues: aiData.dialogues || [], vocabulary: aiData.vocabulary || [], createdAt: Date.now() 
-                });
-
-                document.getElementById('rawJapaneseText').value = ''; document.getElementById('newLessonTitle').value = ''; document.getElementById('newLessonVideo').value = '';
-                window.clearImagePreview();
-                setTimeout(() => { window.selectLesson(lessonsDb.length - 1); }, 800);
-            } catch (error) { err.innerText = "Lỗi: " + error.message; err.classList.remove('hidden'); } 
-            finally { btn.innerHTML = '<i class="fas fa-cat"></i> Mochi Phân tích & Tạo bài'; btn.disabled = false; }
-        }
-
-        window.explainGrammar = async function(text) {
-            window.trackInteraction();
-            window.openAiExplainModal();
-            const contentDiv = document.getElementById('aiExplainBody');
-            contentDiv.innerHTML = '<div class="flex flex-col items-center justify-center py-10"><i class="fas fa-spinner fa-spin text-3xl text-indigo-500 mb-3"></i><span class="text-slate-500 font-medium">Mochi đang phân tích câu...</span></div>';
-
-            try {
-                const prompt = `Phân tích câu tiếng Nhật sau: "${text}". Đóng vai là Mochi giải thích nhé.`;
-                const schema = { type: "OBJECT", properties: { meaning: { type: "STRING" }, politeness: { type: "STRING" }, grammarPoints: { type: "ARRAY", items: { type: "OBJECT", properties: { point: { type: "STRING" }, explanation: { type: "STRING" } } } } } };
-                const data = await callGeminiAPI(prompt, schema);
-
-                let html = `
-                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-4"><div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Ý nghĩa</div><div class="font-semibold text-slate-800">${data.meaning}</div></div>
-                    <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-100 mb-4"><div class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-1">Mức độ lịch sự</div><div class="text-slate-700">${data.politeness}</div></div>
-                    <h3 class="font-bold text-slate-800 mb-2 mt-4">Điểm Ngữ Pháp</h3>
-                `;
-                data.grammarPoints.forEach(g => { html += `<div class="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100 mb-3"><div class="font-bold text-indigo-700 mb-1 text-base japanese-text">${g.point}</div><div class="text-slate-600 leading-relaxed">${g.explanation}</div></div>`; });
-                contentDiv.innerHTML = html;
-            } catch (e) { contentDiv.innerHTML = `<div class="text-red-500 bg-red-50 p-4 rounded-xl text-center">Có lỗi xảy ra: ${e.message}</div>`; }
-        }
-
-        window.generateVocabExample = async function(word, index) {
-            window.trackInteraction();
-            const container = document.getElementById(`vocab-example-${index}`);
-            container.classList.remove('hidden');
-            container.innerHTML = '<div class="flex items-center gap-2 text-amber-600"><i class="fas fa-spinner fa-spin"></i> Mochi đang suy nghĩ...</div>';
-
-            try {
-                const prompt = `Tạo 1 câu ví dụ tiếng Nhật thực tế, tự nhiên sử dụng từ vựng "${word}".`;
-                const schema = { type: "OBJECT", properties: { japanese: { type: "STRING" }, romaji: { type: "STRING" }, vietnamese: { type: "STRING" } } };
-                const data = await callGeminiAPI(prompt, schema);
-
-                container.innerHTML = `
-                    <div class="flex justify-between items-start gap-2"><div class="font-bold text-slate-800 japanese-text text-sm leading-snug">${data.japanese}</div><button onclick="event.stopPropagation(); window.manualSpeak('${data.japanese.replace(/'/g, "\\'")}', 'Example', 'btn-speak-example-${index}')" id="btn-speak-example-${index}" class="bg-amber-100/50 text-amber-600 p-1.5 rounded-lg hover:bg-amber-200 transition-colors shadow-sm active:scale-95 shrink-0 mt-0.5"><i class="fas fa-volume-up text-xs"></i></button></div>
-                    <div class="text-[10px] text-slate-500 font-medium mt-1 mb-1.5">${data.romaji}</div><div class="text-xs text-slate-700 border-t border-amber-200/50 pt-1.5">${data.vietnamese}</div>
-                `;
-            } catch (e) { container.innerHTML = `<div class="text-red-500">Lỗi kết nối Mochi.</div>`; }
-        }
-
         // ==========================================
         // NHK NEWS SYNC
         // ==========================================
@@ -1338,36 +1316,42 @@ Nội dung:\n${rawText}`;
             updateSyncStatus(true);
 
             try {
-                const rssFeeds = ['https://www.nhk.or.jp/rss/news/cat3.xml', 'https://www.nhk.or.jp/rss/news/cat7.xml', 'https://www.nhk.or.jp/rss/news/cat6.xml', 'https://www.nhk.or.jp/rss/news/cat0.xml'];
-                const targetRss = rssFeeds[Math.floor(Math.random() * rssFeeds.length)];
-                const rssUrl = `https://api.rss2json.com/v1/api.json?rss_url=${targetRss}`;
+                // ƯU TIÊN THỂ THAO VÀ CÔNG NGHỆ NHƯ BẠN YÊU CẦU
+                const rssFeeds = [
+                    'https://www.nhk.or.jp/rss/news/cat7.xml', // Thể thao
+                    'https://www.nhk.or.jp/rss/news/cat3.xml', // Khoa học / Công nghệ
+                    'https://www.nhk.or.jp/rss/news/cat0.xml', // Tin chính
+                    'https://www.nhk.or.jp/rss/news/cat6.xml'  // Quốc tế
+                ];
                 
-                const response = await fetch(rssUrl);
-                if (!response.ok) throw new Error("Không thể tải RSS");
-                const data = await response.json();
-                
-                if (!data.items || data.items.length === 0) {
-                    isSyncingNews = false; updateSyncStatus(false);
-                    return { status: 'no_news', message: 'Nguồn tin hiện không có dữ liệu' };
-                }
-
                 let newArticle = null;
-                for (const item of data.items) {
-                    const rawTitle = item.title.split(' |')[0].trim();
-                    const cleanTitle = `Bản tin NHK: ${rawTitle}`;
+                
+                for (const targetRss of rssFeeds) {
+                    const rssUrl = `https://api.rss2json.com/v1/api.json?rss_url=${targetRss}`;
+                    const response = await fetch(rssUrl);
+                    if (!response.ok) continue;
+                    const data = await response.json();
                     
-                    const isDuplicate = lessonsDb.some(l => {
-                        if (!l.title) return false;
-                        if (l.sourceLink && item.link && l.sourceLink === item.link) return true;
-                        const existingTitle = l.title.trim().toLowerCase();
-                        if (existingTitle === cleanTitle.toLowerCase()) return true;
-                        const baseExisting = existingTitle.replace('bản tin nhk: ', '').trim();
-                        const baseNew = rawTitle.toLowerCase().trim();
-                        if (baseExisting.length > 15 && baseNew.length > 15 && (baseExisting.includes(baseNew) || baseNew.includes(baseExisting))) return true;
-                        return false;
-                    });
+                    if (!data.items || data.items.length === 0) continue;
 
-                    if (!isDuplicate) { newArticle = { ...item, cleanTitle }; break; }
+                    for (const item of data.items) {
+                        const rawTitle = item.title.split(' |')[0].trim();
+                        const cleanTitle = `NHKニュース: ${rawTitle}`; // Đã cập nhật tiền tố
+                        
+                        const isDuplicate = lessonsDb.some(l => {
+                            if (!l.title) return false;
+                            if (l.sourceLink && item.link && l.sourceLink === item.link) return true;
+                            const existingTitle = l.title.trim().toLowerCase();
+                            if (existingTitle === cleanTitle.toLowerCase()) return true;
+                            const baseExisting = existingTitle.replace('nhkニュース: ', '').replace('bản tin nhk: ', '').trim();
+                            const baseNew = rawTitle.toLowerCase().trim();
+                            if (baseExisting.length > 15 && baseNew.length > 15 && (baseExisting.includes(baseNew) || baseNew.includes(baseExisting))) return true;
+                            return false;
+                        });
+
+                        if (!isDuplicate) { newArticle = { ...item, cleanTitle }; break; }
+                    }
+                    if (newArticle) break; // Thoát vòng lặp mảng RSS nếu tìm thấy bài mới
                 }
 
                 if (!newArticle) {
@@ -1395,7 +1379,7 @@ Bản tin:\n${rawText}`;
                 const safeDocId = 'nhk_' + newArticle.link.replace(/[^a-zA-Z0-9]/g, '');
                 
                 await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lessons', safeDocId), { 
-                    title: newArticle.cleanTitle, level: aiData.level || 'N3', topic: aiData.topic || 'Tin thế giới', tags: ['NHK', 'Auto-Sync'], 
+                    title: newArticle.cleanTitle, level: aiData.level || 'N3', topic: aiData.topic || 'Tin thế giới', tags: ['NHK'], // Đã bỏ thẻ Auto-Sync
                     videoId: '', imageUrl: finalImageUrl, dialogues: aiData.dialogues || [], vocabulary: aiData.vocabulary || [], createdAt: Date.now(), sourceLink: newArticle.link
                 });
 
